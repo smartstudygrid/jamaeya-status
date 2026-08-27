@@ -380,6 +380,16 @@
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
           document.getElementById('sync-banner').classList.add('hidden');
           showToast("Refreshed data from Google Sheet!", "success");
+        } else if (data && (data.rows || Array.isArray(data))) {
+          const parsed = parseRowsToState(data.rows || data);
+          if (parsed && parsed.members && parsed.members.length > 0) {
+            viewerState = parsed;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+            document.getElementById('sync-banner').classList.add('hidden');
+            showToast("Refreshed data from Jamaeya_Data sheet!", "success");
+          } else {
+            document.getElementById('sync-banner').classList.remove('hidden');
+          }
         } else {
           document.getElementById('sync-banner').classList.remove('hidden');
         }
@@ -391,6 +401,70 @@
         refreshBtn.disabled = false;
         refreshViewer();
       }
+    }
+
+    function parseRowsToState(rows) {
+      if (!rows || !Array.isArray(rows) || rows.length < 2) return null;
+
+      const headers = rows[0];
+      const monthHeaders = headers.slice(3); // Column 3 onwards are month labels
+
+      const members = [];
+      const records = {};
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || !row[0]) continue;
+
+        const name = String(row[0]).trim();
+        const shareStr = String(row[1] || "").toLowerCase();
+        const type = (shareStr.includes("half") || shareStr.includes("0.5")) ? "half" : "full";
+
+        const slotStr = String(row[2] || "");
+        const slotMatch = slotStr.match(/\d+/);
+        const payoutMonth = slotMatch ? parseInt(slotMatch[0], 10) : i;
+
+        const memberId = "m_" + i;
+        members.push({
+          id: memberId,
+          name: name,
+          type: type,
+          payoutMonth: payoutMonth
+        });
+
+        for (let m = 0; m < monthHeaders.length; m++) {
+          const cellVal = String(row[3 + m] || "").trim().toLowerCase();
+          const monthIndex = m + 1;
+          const key = `${memberId}_${monthIndex}`;
+
+          let status = "pending";
+          if (cellVal.includes("paid") || cellVal === "paid" || cellVal.includes("✅")) {
+            status = "paid";
+          } else if (cellVal.includes("recipient") || cellVal.includes("covered") || cellVal.includes("self-deduct") || cellVal.includes("🎁")) {
+            status = "recipient";
+          } else {
+            status = "pending";
+          }
+
+          records[key] = {
+            status: status,
+            method: status === 'recipient' ? 'Self-Deducted' : 'Bank Transfer',
+            date: ''
+          };
+        }
+      }
+
+      return {
+        config: {
+          title: viewerState?.config?.title || "AIS Jamaeya 2026-2027",
+          fullAmount: viewerState?.config?.fullAmount || 2000,
+          halfAmount: viewerState?.config?.halfAmount || 1000,
+          durationMonths: monthHeaders.length > 0 ? monthHeaders.length : (viewerState?.config?.durationMonths || 10),
+          startMonth: viewerState?.config?.startMonth || "2026-07"
+        },
+        members: members,
+        records: records
+      };
     }
 
     function refreshViewer() {
