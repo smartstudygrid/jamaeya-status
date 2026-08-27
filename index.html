@@ -103,7 +103,14 @@
 
         <!-- Live Sync Status Indicator -->
         <div class="flex items-center gap-2 shrink-0">
-          <button onclick="fetchLatestData()" id="btn-refresh" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition-all">
+          <span class="hidden md:flex items-center gap-1.5 text-[11px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/80 px-2.5 py-1 rounded-lg font-semibold">
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            Live Auto-Sync (30s)
+          </span>
+          <button onclick="fetchLatestData(false)" id="btn-refresh" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition-all">
             <i class="fa-solid fa-rotate" id="refresh-icon"></i>
             <span class="hidden sm:inline">Refresh Data</span>
           </button>
@@ -364,11 +371,11 @@
       return found !== -1 ? found + 1 : 2;
     }
 
-    async function fetchLatestData() {
+    async function fetchLatestData(silent = true) {
       const refreshBtn = document.getElementById('btn-refresh');
       const icon = document.getElementById('refresh-icon');
       
-      icon.classList.add('fa-spin');
+      if (!silent) icon.classList.add('fa-spin');
       refreshBtn.disabled = true;
 
       try {
@@ -379,14 +386,14 @@
           viewerState = data;
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
           document.getElementById('sync-banner').classList.add('hidden');
-          showToast("Refreshed data from Google Sheet!", "success");
+          if (!silent) showToast("Refreshed data from Google Sheet!", "success");
         } else if (data && (data.rows || Array.isArray(data))) {
           const parsed = parseRowsToState(data.rows || data);
           if (parsed && parsed.members && parsed.members.length > 0) {
             viewerState = parsed;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
             document.getElementById('sync-banner').classList.add('hidden');
-            showToast("Refreshed data from Jamaeya_Data sheet!", "success");
+            if (!silent) showToast("Refreshed data from Jamaeya_Data sheet!", "success");
           } else {
             document.getElementById('sync-banner').classList.remove('hidden');
           }
@@ -845,7 +852,19 @@
       viewerState = loadLocalState();
       currentSelectedMonthIndex = determineCurrentMonthIndex();
       refreshViewer();
-      fetchLatestData(); // Automatically fetch live state from Google Sheet
+      fetchLatestData(false); // Initial load with toast feedback
+
+      // Auto-sync every 30 seconds seamlessly in the background
+      setInterval(() => {
+        fetchLatestData(true);
+      }, 30000);
+
+      // Auto-sync whenever the user switches back to this browser tab
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          fetchLatestData(true);
+        }
+      });
     });
   </script>
 </body>
