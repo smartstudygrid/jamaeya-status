@@ -291,8 +291,8 @@
     const EMBEDDED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxBmEQi1QigtZQ5uqdUhsePYDZkndnJlTjG9zqGXzQ8HGg_zrGywYKBYTGC_eN_MXqYIQ/exec";
     const STORAGE_KEY = 'AIS_JAMAEYA_DATA_V3';
 
-    // Default Demo State Fallback
-    const defaultState = {
+    // Default Fallback State
+    const defaultViewerState = {
       config: {
         title: "AIS Jamaeya 2026-2027",
         fullAmount: 2000,
@@ -311,34 +311,237 @@
         { id: "m8", name: "Sami Qasim", type: "full", payoutMonth: 7 },
         { id: "m9", name: "Nasser Al-Ghamdi", type: "full", payoutMonth: 8 },
         { id: "m10", name: "Zaid Al-Harbi", type: "full", payoutMonth: 9 },
-        { id: "m11", name: "Organizer (You)", type: "full", payoutMonth: 10 }
+        { id: "m11", name: "Organizer (Amanullah Khan)", type: "full", payoutMonth: 10 }
       ],
-      records: {
-        "m1_1": { status: "recipient", date: "2026-07-01", method: "Self-Deducted" },
-        "m2_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
-        "m3_1": { status: "paid", date: "2026-07-01", method: "STC Pay" },
-        "m4_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
-        "m5_1": { status: "paid", date: "2026-07-01", method: "Cash" },
-        "m6_1": { status: "paid", date: "2026-07-01", method: "STC Pay" },
-        "m7_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
-        "m8_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
-        "m9_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
-        "m10_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
-        "m11_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" }
-      }
+      records: {}
     };
 
     let viewerState = null;
     let currentSelectedMonthIndex = 2;
 
     function loadLocalState() {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) return JSON.parse(saved);
-      } catch (e) {
-        console.warn("LocalStorage unavailable:", e);
+      const keys = ['AIS_JAMAEYA_DATA_V3', 'AIS_JAMAEYA_DATA_V2', 'AIS_JAMAEYA_DATA_V1', 'AIS_JAMAEYA_DATA'];
+      for (const k of keys) {
+        try {
+          const saved = localStorage.getItem(k);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && parsed.members && parsed.members.length > 0) {
+              return parsed;
+            }
+          }
+        } catch (e) {
+          console.warn("Error reading localStorage key:", k, e);
+        }
       }
-      return JSON.parse(JSON.stringify(defaultState));
+      return JSON.parse(JSON.stringify(defaultViewerState));
+    }
+
+    function getBaseName(name) {
+      if (!name) return "";
+      return name.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+    }
+
+    function getPersonTotalMonthlyContribution(personName) {
+      const targetBase = getBaseName(personName);
+      let total = 0;
+      viewerState.members.forEach(m => {
+        if (getBaseName(m.name) === targetBase) {
+          total += (m.type === 'full' ? viewerState.config.fullAmount : viewerState.config.halfAmount);
+        }
+      });
+      return total;
+    }
+
+    function getTotalMonthlyPool() {
+      let totalSlotUnits = 0;
+      viewerState.members.forEach(mem => {
+        totalSlotUnits += (mem.type === 'full' ? 1.0 : 0.5);
+      });
+      return totalSlotUnits * viewerState.config.fullAmount;
+    }
+
+    function refreshViewer() {
+      const months = getMonthList();
+
+      document.getElementById('app-title-header').childNodes[0].nodeValue = viewerState.config.title + " ";
+      document.getElementById('header-duration-sub').textContent = `${months[0].label} – ${months[months.length - 1].label} (${viewerState.config.durationMonths} Months)`;
+
+      // Populate Month Select Dropdown
+      const dropdown = document.getElementById('month-select-dropdown');
+      dropdown.innerHTML = '';
+      months.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.index;
+        opt.textContent = `Month ${m.index}: ${m.label}`;
+        if (m.index === currentSelectedMonthIndex) opt.selected = true;
+        dropdown.appendChild(opt);
+      });
+
+      // Populate Personal Lookup Dropdown
+      const personalSelect = document.getElementById('personal-member-select');
+      personalSelect.innerHTML = '<option value="">-- Select Member --</option>';
+      viewerState.members.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = `${m.name} (${m.type === 'full' ? 'Full Share' : 'Half Share'})`;
+        personalSelect.appendChild(opt);
+      });
+
+      // Calculate KPI Totals
+      const totalPool = getTotalMonthlyPool();
+      let totalSlotUnits = 0;
+      viewerState.members.forEach(mem => {
+        totalSlotUnits += (mem.type === 'full' ? 1.0 : 0.5);
+      });
+      document.getElementById('kpi-pool-total').innerHTML = `${totalPool.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
+      document.getElementById('kpi-slots-count').textContent = `${totalSlotUnits} Total Slots`;
+
+      renderSelectedMonthView();
+      renderMatrixView();
+    }
+
+    function renderSelectedMonthView() {
+      const monthIdx = parseInt(document.getElementById('month-select-dropdown').value, 10) || currentSelectedMonthIndex;
+      currentSelectedMonthIndex = monthIdx;
+
+      const recipients = viewerState.members.filter(m => parseInt(m.payoutMonth, 10) === monthIdx);
+      const spotlight = document.getElementById('recipient-spotlight-card');
+      const totalPool = getTotalMonthlyPool();
+
+      if (recipients.length === 0) {
+        spotlight.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-amber-400 text-lg font-bold">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-sm sm:text-base">No Recipient Assigned</h3>
+              <p class="text-xs text-slate-300">Slot ${monthIdx} has no member scheduled.</p>
+            </div>
+          </div>
+        `;
+      } else if (recipients.length === 1) {
+        const rec = recipients[0];
+        const grossSlotPool = rec.type === 'full' ? totalPool : (totalPool / 2);
+        const personContrib = getPersonTotalMonthlyContribution(rec.name);
+        const duePayout = Math.max(0, grossSlotPool - personContrib);
+
+        spotlight.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
+              <i class="fa-solid fa-gift"></i>
+            </div>
+            <div>
+              <span class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-300">Month ${monthIdx} Recipient</span>
+              <h3 class="font-bold text-base sm:text-lg text-white flex items-center gap-2">${rec.name} <span class="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-indigo-800 text-indigo-200 border border-indigo-700">${rec.type === 'full' ? 'Full Share' : 'Half Share'}</span></h3>
+              <p class="text-xs text-slate-300">Net Payout: <strong class="text-emerald-400">${duePayout.toLocaleString()} SAR</strong> (Self-Deducted ${personContrib.toLocaleString()} SAR total contribution)</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-500/30 font-medium">
+              <i class="fa-solid fa-shield-halved mr-1"></i> Month Payout Scheduled
+            </span>
+          </div>
+        `;
+      } else {
+        const splitText = recipients.map(r => {
+          const grossSlotPool = r.type === 'full' ? totalPool : (totalPool / 2);
+          const personContrib = getPersonTotalMonthlyContribution(r.name);
+          const due = Math.max(0, grossSlotPool - personContrib);
+          return `${r.name}: <strong class="text-emerald-400">${due.toLocaleString()} SAR</strong>`;
+        }).join(' & ');
+
+        spotlight.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
+              <i class="fa-solid fa-people-arrows"></i>
+            </div>
+            <div>
+              <span class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-300">Month ${monthIdx} Shared Slot (${recipients.length} Recipients)</span>
+              <h3 class="font-bold text-base sm:text-lg text-white">${recipients.map(r => r.name).join(' & ')}</h3>
+              <p class="text-xs text-slate-300">Split Payouts: ${splitText}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-500/30 font-medium">
+              <i class="fa-solid fa-users-viewfinder mr-1"></i> Split Slot
+            </span>
+          </div>
+        `;
+      }
+
+      // Render Member List
+      const container = document.getElementById('month-participants-list');
+      container.innerHTML = '';
+
+      let totalCollected = 0;
+      let pendingCount = 0;
+
+      viewerState.members.forEach(member => {
+        const key = `${member.id}_${monthIdx}`;
+        const isRecipient = parseInt(member.payoutMonth, 10) === monthIdx;
+        const expectedAmt = member.type === 'full' ? viewerState.config.fullAmount : viewerState.config.halfAmount;
+        const record = viewerState.records[key] || {};
+        const status = record.status || (isRecipient ? 'recipient' : 'pending');
+
+        if (status === 'paid' || status === 'recipient') {
+          totalCollected += expectedAmt;
+        } else {
+          pendingCount++;
+        }
+
+        let badgeHtml = '';
+        if (status === 'paid') {
+          badgeHtml = `<span class="badge-paid px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-solid fa-circle-check text-xs"></i> Paid</span>`;
+        } else if (status === 'recipient') {
+          badgeHtml = `<span class="badge-recipient px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-solid fa-gift text-xs"></i> Covered (Recipient)</span>`;
+        } else {
+          badgeHtml = `<span class="badge-pending px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-regular fa-clock text-xs"></i> Pending</span>`;
+        }
+
+        const row = document.createElement('div');
+        row.className = "member-row p-4 hover:bg-slate-50/70 transition flex items-center justify-between gap-4";
+        row.setAttribute('data-name', member.name.toLowerCase());
+
+        row.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl ${member.type === 'full' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'} flex items-center justify-center font-bold text-xs sm:text-sm shrink-0">
+              ${member.type === 'full' ? '1.0' : '0.5'}
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-900 text-sm">${member.name}</span>
+                ${isRecipient ? '<span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Recipient</span>' : ''}
+              </div>
+              <p class="text-xs text-slate-500">
+                ${member.type === 'full' ? 'Full Share' : 'Half Share'} &bull; Amount: <strong class="text-slate-800">${expectedAmt.toLocaleString()} SAR</strong>
+              </p>
+            </div>
+          </div>
+          <div>
+            ${badgeHtml}
+          </div>
+        `;
+        container.appendChild(row);
+      });
+
+      // Update KPI Banner
+      document.getElementById('kpi-collected-amount').innerHTML = `${totalCollected.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
+      document.getElementById('kpi-pending-badge').textContent = `${pendingCount} Pending`;
+
+      const recipientNames = recipients.map(r => r.name).join(' & ') || 'None';
+      document.getElementById('kpi-recipient-names').innerHTML = `<i class="fa-solid fa-gift text-indigo-500"></i> ${recipientNames}`;
+
+      let activeMonthNetPayout = 0;
+      recipients.forEach(r => {
+        const grossSlotPool = r.type === 'full' ? totalPool : (totalPool / 2);
+        const personContrib = getPersonTotalMonthlyContribution(r.name);
+        activeMonthNetPayout += Math.max(0, grossSlotPool - personContrib);
+      });
+      if (recipients.length === 0) activeMonthNetPayout = totalPool;
+
+      document.getElementById('kpi-net-payout').innerHTML = `${activeMonthNetPayout.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
     }
 
     function getMonthList() {
@@ -472,170 +675,6 @@
         members: members,
         records: records
       };
-    }
-
-    function refreshViewer() {
-      const months = getMonthList();
-
-      document.getElementById('app-title-header').childNodes[0].nodeValue = viewerState.config.title + " ";
-      document.getElementById('header-duration-sub').textContent = `${months[0].label} – ${months[months.length - 1].label} (${viewerState.config.durationMonths} Months)`;
-
-      // Populate Month Select Dropdown
-      const dropdown = document.getElementById('month-select-dropdown');
-      dropdown.innerHTML = '';
-      months.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.index;
-        opt.textContent = `Month ${m.index}: ${m.label}`;
-        if (m.index === currentSelectedMonthIndex) opt.selected = true;
-        dropdown.appendChild(opt);
-      });
-
-      // Populate Personal Lookup Dropdown
-      const personalSelect = document.getElementById('personal-member-select');
-      personalSelect.innerHTML = '<option value="">-- Select Member --</option>';
-      viewerState.members.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = `${m.name} (${m.type === 'full' ? 'Full Share' : 'Half Share'})`;
-        personalSelect.appendChild(opt);
-      });
-
-      // Calculate KPI Totals
-      let totalSlotUnits = 0;
-      viewerState.members.forEach(mem => {
-        totalSlotUnits += (mem.type === 'full' ? 1.0 : 0.5);
-      });
-      const totalPool = (totalSlotUnits * viewerState.config.fullAmount);
-      document.getElementById('kpi-pool-total').innerHTML = `${totalPool.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
-      document.getElementById('kpi-slots-count').textContent = `${totalSlotUnits} Total Slots`;
-
-      renderSelectedMonthView();
-      renderMatrixView();
-    }
-
-    function renderSelectedMonthView() {
-      const monthIdx = parseInt(document.getElementById('month-select-dropdown').value, 10) || currentSelectedMonthIndex;
-      currentSelectedMonthIndex = monthIdx;
-
-      const recipients = viewerState.members.filter(m => parseInt(m.payoutMonth, 10) === monthIdx);
-      const spotlight = document.getElementById('recipient-spotlight-card');
-
-      if (recipients.length === 0) {
-        spotlight.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-amber-400 text-lg font-bold">
-              <i class="fa-solid fa-triangle-exclamation"></i>
-            </div>
-            <div>
-              <h3 class="font-bold text-sm sm:text-base">No Recipient Assigned</h3>
-              <p class="text-xs text-slate-300">Slot ${monthIdx} has no member scheduled.</p>
-            </div>
-          </div>
-        `;
-      } else if (recipients.length === 1) {
-        const rec = recipients[0];
-        const duePayout = viewerState.config.fullAmount * 9;
-        spotlight.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
-              <i class="fa-solid fa-gift"></i>
-            </div>
-            <div>
-              <span class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-300">Month ${monthIdx} Recipient</span>
-              <h3 class="font-bold text-base sm:text-lg text-white flex items-center gap-2">${rec.name} <span class="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-indigo-800 text-indigo-200 border border-indigo-700">Full Share</span></h3>
-              <p class="text-xs text-slate-300">Net Payout: <strong class="text-emerald-400">${duePayout.toLocaleString()} SAR</strong> (Self-Deducted)</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-500/30 font-medium">
-              <i class="fa-solid fa-shield-halved mr-1"></i> Month Payout Scheduled
-            </span>
-          </div>
-        `;
-      } else {
-        const splitAmount = (viewerState.config.fullAmount * 9) / recipients.length;
-        const names = recipients.map(r => r.name).join(' & ');
-        spotlight.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
-              <i class="fa-solid fa-people-arrows"></i>
-            </div>
-            <div>
-              <span class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-300">Month ${monthIdx} Shared Slot (2 Recipients)</span>
-              <h3 class="font-bold text-base sm:text-lg text-white">${names}</h3>
-              <p class="text-xs text-slate-300">Split Payout: <strong class="text-emerald-400">${splitAmount.toLocaleString()} SAR</strong> each</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-500/30 font-medium">
-              <i class="fa-solid fa-users-viewfinder mr-1"></i> 50/50 Split Slot
-            </span>
-          </div>
-        `;
-      }
-
-      // Render Member List
-      const container = document.getElementById('month-participants-list');
-      container.innerHTML = '';
-
-      let totalCollected = 0;
-      let pendingCount = 0;
-
-      viewerState.members.forEach(member => {
-        const key = `${member.id}_${monthIdx}`;
-        const isRecipient = parseInt(member.payoutMonth, 10) === monthIdx;
-        const expectedAmt = member.type === 'full' ? viewerState.config.fullAmount : viewerState.config.halfAmount;
-        const record = viewerState.records[key] || {};
-        const status = record.status || (isRecipient ? 'recipient' : 'pending');
-
-        if (status === 'paid' || status === 'recipient') {
-          totalCollected += expectedAmt;
-        } else {
-          pendingCount++;
-        }
-
-        let badgeHtml = '';
-        if (status === 'paid') {
-          badgeHtml = `<span class="badge-paid px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-solid fa-circle-check text-xs"></i> Paid</span>`;
-        } else if (status === 'recipient') {
-          badgeHtml = `<span class="badge-recipient px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-solid fa-gift text-xs"></i> Covered (Recipient)</span>`;
-        } else {
-          badgeHtml = `<span class="badge-pending px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-regular fa-clock text-xs"></i> Pending</span>`;
-        }
-
-        const row = document.createElement('div');
-        row.className = "member-row p-4 hover:bg-slate-50/70 transition flex items-center justify-between gap-4";
-        row.setAttribute('data-name', member.name.toLowerCase());
-
-        row.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl ${member.type === 'full' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'} flex items-center justify-center font-bold text-xs sm:text-sm shrink-0">
-              ${member.type === 'full' ? '1.0' : '0.5'}
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-900 text-sm">${member.name}</span>
-                ${isRecipient ? '<span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Recipient</span>' : ''}
-              </div>
-              <p class="text-xs text-slate-500">
-                ${member.type === 'full' ? 'Full Share' : 'Half Share'} &bull; Amount: <strong class="text-slate-800">${expectedAmt.toLocaleString()} SAR</strong>
-              </p>
-            </div>
-          </div>
-          <div>
-            ${badgeHtml}
-          </div>
-        `;
-        container.appendChild(row);
-      });
-
-      // Update KPI Banner
-      document.getElementById('kpi-collected-amount').innerHTML = `${totalCollected.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
-      document.getElementById('kpi-pending-badge').textContent = `${pendingCount} Pending`;
-
-      const recipientNames = recipients.map(r => r.name).join(' & ') || 'None';
-      document.getElementById('kpi-recipient-names').innerHTML = `<i class="fa-solid fa-gift text-indigo-500"></i> ${recipientNames}`;
     }
 
     function filterMemberList() {
