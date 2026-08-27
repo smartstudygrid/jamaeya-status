@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AIS Jamaeya - Participant Status Viewer</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <!-- Google Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              800: '#065f46',
+              900: '#064e3b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom Scrollbars and badges */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .badge-paid {
+      background-color: #dcfce7;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+    .badge-pending {
+      background-color: #fef9c3;
+      color: #a16207;
+      border: 1px solid #fde047;
+    }
+    .badge-recipient {
+      background-color: #e0e7ff;
+      color: #4338ca;
+      border: 1px solid #c7d2fe;
+    }
+    .shimmer {
+      background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+      background-size: 200% 100%;
+      animation: loading 1.5s infinite;
+    }
+    @keyframes loading {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Header -->
+  <header class="bg-slate-900 text-white sticky top-0 z-30 shadow-md border-b border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Logo & Title -->
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-brand-500/20 shrink-0">
+            <i class="fa-solid fa-eye text-white text-lg"></i>
+          </div>
+          <div class="min-w-0">
+            <h1 class="font-bold text-base sm:text-lg leading-tight tracking-tight flex items-center gap-2 truncate" id="app-title-header">
+              AIS Jamaeya Status
+              <span class="text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium" id="cycle-badge">Participant View</span>
+            </h1>
+            <p class="text-[11px] text-slate-400 truncate" id="header-duration-sub">July 2026 – April 2027 (10 Months)</p>
+          </div>
+        </div>
+
+        <!-- Live Sync Status Indicator -->
+        <div class="flex items-center gap-2 shrink-0">
+          <button onclick="fetchLatestData()" id="btn-refresh" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition-all">
+            <i class="fa-solid fa-rotate" id="refresh-icon"></i>
+            <span class="hidden sm:inline">Refresh Data</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab View Switcher -->
+      <div class="flex space-x-1 border-t border-slate-800 pt-2 pb-1 overflow-x-auto text-xs sm:text-sm font-medium">
+        <button id="tab-btn-month" onclick="switchViewTab('month')" class="view-tab-btn px-3.5 py-2 rounded-lg text-emerald-400 bg-slate-800 flex items-center gap-2 transition-all shrink-0 font-bold">
+          <i class="fa-regular fa-calendar-days"></i> Month-by-Month Status
+        </button>
+        <button id="tab-btn-matrix" onclick="switchViewTab('matrix')" class="view-tab-btn px-3.5 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition-all shrink-0">
+          <i class="fa-solid fa-table-cells"></i> Full 10-Month Matrix
+        </button>
+        <button id="tab-btn-lookup" onclick="switchViewTab('lookup')" class="view-tab-btn px-3.5 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition-all shrink-0">
+          <i class="fa-solid fa-user-check"></i> Personal Status Check
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
+
+    <!-- Sync Alert Banner -->
+    <div id="sync-banner" class="hidden mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-800 text-xs flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-circle-info text-amber-600 text-sm"></i>
+        <span>Viewing cached state. Tap refresh to get live Google Sheet updates.</span>
+      </div>
+      <button onclick="fetchLatestData()" class="px-2.5 py-1 bg-amber-600 text-white font-bold rounded-lg hover:bg-amber-700 transition">
+        Sync Now
+      </button>
+    </div>
+
+    <!-- Top KPI Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Active Month Pool</span>
+        <div class="flex items-baseline justify-between mt-1">
+          <span class="text-xl sm:text-2xl font-bold text-slate-900" id="kpi-pool-total">20,000 <span class="text-xs font-normal text-slate-500">SAR</span></span>
+          <span class="text-[10px] sm:text-xs font-medium text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full" id="kpi-slots-count">10 Slots</span>
+        </div>
+      </div>
+
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Net Monthly Payout</span>
+        <div class="flex items-baseline justify-between mt-1">
+          <span class="text-xl sm:text-2xl font-bold text-slate-900" id="kpi-net-payout">18,000 <span class="text-xs font-normal text-slate-500">SAR</span></span>
+          <span class="text-[10px] sm:text-xs text-slate-500">Self-Deducted</span>
+        </div>
+      </div>
+
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Collected This Month</span>
+        <div class="flex items-baseline justify-between mt-1">
+          <span class="text-xl sm:text-2xl font-bold text-emerald-600" id="kpi-collected-amount">0 <span class="text-xs font-normal text-slate-500">SAR</span></span>
+          <span class="text-[10px] sm:text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full" id="kpi-pending-badge">0 Pending</span>
+        </div>
+      </div>
+
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <span class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Month Recipient(s)</span>
+        <div class="mt-1 truncate font-bold text-slate-800 text-xs sm:text-sm flex items-center gap-1.5" id="kpi-recipient-names">
+          <i class="fa-solid fa-gift text-indigo-500"></i> Loading...
+        </div>
+      </div>
+    </div>
+
+    <!-- VIEW 1: MONTH-BY-MONTH STATUS -->
+    <section id="view-month" class="space-y-6">
+      <!-- Toolbar Controls -->
+      <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+          <label for="month-select-dropdown" class="text-xs sm:text-sm font-semibold text-slate-700 whitespace-nowrap">
+            <i class="fa-regular fa-calendar text-emerald-600 mr-1.5"></i> Select Month to View:
+          </label>
+          <div class="relative w-full sm:w-auto">
+            <select id="month-select-dropdown" onchange="renderSelectedMonthView()" class="bg-slate-50 border border-slate-300 text-slate-800 text-xs sm:text-sm rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 block w-full p-2.5 pr-8 font-semibold shadow-sm appearance-none cursor-pointer">
+              <!-- Dynamically populated -->
+            </select>
+            <i class="fa-solid fa-chevron-down absolute right-3 top-3.5 text-xs text-slate-400 pointer-events-none"></i>
+          </div>
+        </div>
+
+        <!-- Filter Search Bar -->
+        <div class="relative w-full sm:w-64">
+          <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-xs text-slate-400"></i>
+          <input type="text" id="member-search-input" onkeyup="filterMemberList()" placeholder="Search participant..." class="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-emerald-500 outline-none">
+        </div>
+      </div>
+
+      <!-- Recipient Spotlight Card -->
+      <div id="recipient-spotlight-card" class="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 sm:p-5 rounded-2xl shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Monthly Contributions Status Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-4 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between">
+          <h2 class="font-bold text-slate-800 text-xs sm:text-base flex items-center gap-2">
+            <i class="fa-solid fa-list-check text-slate-500"></i> Monthly Contribution Breakdown
+          </h2>
+          <span class="text-xs text-slate-500 font-medium" id="month-list-count">10 Members</span>
+        </div>
+
+        <div class="divide-y divide-slate-100" id="month-participants-list">
+          <!-- Member rows injected via JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: FULL 10-MONTH MATRIX -->
+    <section id="view-matrix" class="hidden space-y-6">
+      <div class="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-slate-900">Jamaeya 10-Month Status Grid</h2>
+          <p class="text-xs text-slate-500">Complete overview of payments and payouts for all participants.</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="hidden sm:flex items-center gap-2 text-xs font-medium text-slate-600">
+            <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-500"></span> Paid</span>
+            <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-amber-400"></span> Pending</span>
+            <span class="inline-flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-indigo-500"></span> Recipient</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Matrix Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs sm:text-sm" id="matrix-table">
+            <!-- Rendered via JS -->
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 3: PERSONAL STATUS LOOKUP -->
+    <section id="view-lookup" class="hidden space-y-6">
+      <div class="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm max-w-2xl mx-auto text-center space-y-4">
+        <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto text-xl shadow-inner">
+          <i class="fa-solid fa-user-gear"></i>
+        </div>
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-slate-900">Check Your Personal Status</h2>
+          <p class="text-xs text-slate-500 mt-1">Select your name below to view your personal 10-month payment record and assigned payout slot.</p>
+        </div>
+
+        <div class="max-w-md mx-auto relative text-left">
+          <label for="personal-member-select" class="block text-xs font-semibold text-slate-700 mb-1">Select Your Name:</label>
+          <select id="personal-member-select" onchange="renderPersonalStatement()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold focus:ring-2 focus:ring-emerald-500 outline-none">
+            <!-- Dynamically populated -->
+          </select>
+        </div>
+      </div>
+
+      <!-- Personal Statement Output Card -->
+      <div id="personal-statement-card" class="max-w-2xl mx-auto">
+        <!-- Injected via JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-white border-t border-slate-200 py-4 mt-8">
+    <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <span>AIS Jamaeya Participant Portal &copy; 2026-2027</span>
+      <span class="flex items-center gap-2">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+        Read-Only Sheet Sync
+      </span>
+    </div>
+  </footer>
+
+  <script>
+    // Embedded WebApp URL
+    const EMBEDDED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxBmEQi1QigtZQ5uqdUhsePYDZkndnJlTjG9zqGXzQ8HGg_zrGywYKBYTGC_eN_MXqYIQ/exec";
+    const STORAGE_KEY = 'AIS_JAMAEYA_DATA_V3';
+
+    // Default Demo State Fallback
+    const defaultState = {
+      config: {
+        title: "AIS Jamaeya 2026-2027",
+        fullAmount: 2000,
+        halfAmount: 1000,
+        durationMonths: 10,
+        startMonth: "2026-07"
+      },
+      members: [
+        { id: "m1", name: "Ahmed Al-Mansoor", type: "full", payoutMonth: 1 },
+        { id: "m2", name: "Khalid Al-Otaibi", type: "full", payoutMonth: 2 },
+        { id: "m3", name: "Faisal Salem", type: "full", payoutMonth: 3 },
+        { id: "m4", name: "Tariq Aziz", type: "full", payoutMonth: 4 },
+        { id: "m5", name: "Omar Farooq", type: "full", payoutMonth: 5 },
+        { id: "m6", name: "Aman Ullah", type: "half", payoutMonth: 6 },
+        { id: "m7", name: "Wajid Khan", type: "half", payoutMonth: 6 },
+        { id: "m8", name: "Sami Qasim", type: "full", payoutMonth: 7 },
+        { id: "m9", name: "Nasser Al-Ghamdi", type: "full", payoutMonth: 8 },
+        { id: "m10", name: "Zaid Al-Harbi", type: "full", payoutMonth: 9 },
+        { id: "m11", name: "Organizer (You)", type: "full", payoutMonth: 10 }
+      ],
+      records: {
+        "m1_1": { status: "recipient", date: "2026-07-01", method: "Self-Deducted" },
+        "m2_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
+        "m3_1": { status: "paid", date: "2026-07-01", method: "STC Pay" },
+        "m4_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
+        "m5_1": { status: "paid", date: "2026-07-01", method: "Cash" },
+        "m6_1": { status: "paid", date: "2026-07-01", method: "STC Pay" },
+        "m7_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
+        "m8_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
+        "m9_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
+        "m10_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" },
+        "m11_1": { status: "paid", date: "2026-07-01", method: "Bank Transfer" }
+      }
+    };
+
+    let viewerState = null;
+    let currentSelectedMonthIndex = 2;
+
+    function loadLocalState() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.warn("LocalStorage unavailable:", e);
+      }
+      return JSON.parse(JSON.stringify(defaultState));
+    }
+
+    function getMonthList() {
+      const months = [];
+      const [startYear, startMonthNum] = viewerState.config.startMonth.split('-').map(Number);
+      const total = parseInt(viewerState.config.durationMonths, 10) || 10;
+
+      for (let i = 0; i < total; i++) {
+        const d = new Date(startYear, startMonthNum - 1 + i, 1);
+        const monthName = d.toLocaleString('en-US', { month: 'long' });
+        const year = d.getFullYear();
+        months.push({
+          index: i + 1,
+          label: `${monthName} ${year}`,
+          shortLabel: `${d.toLocaleString('en-US', { month: 'short' })} '${String(year).slice(-2)}`,
+          dateObj: d
+        });
+      }
+      return months;
+    }
+
+    function determineCurrentMonthIndex() {
+      const months = getMonthList();
+      const now = new Date();
+      const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const found = months.findIndex(m => {
+        const mym = `${m.dateObj.getFullYear()}-${String(m.dateObj.getMonth() + 1).padStart(2, '0')}`;
+        return mym === currentYM;
+      });
+      return found !== -1 ? found + 1 : 2;
+    }
+
+    async function fetchLatestData() {
+      const refreshBtn = document.getElementById('btn-refresh');
+      const icon = document.getElementById('refresh-icon');
+      
+      icon.classList.add('fa-spin');
+      refreshBtn.disabled = true;
+
+      try {
+        const response = await fetch(EMBEDDED_SCRIPT_URL);
+        const data = await response.json();
+
+        if (data && data.config && data.members) {
+          viewerState = data;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          document.getElementById('sync-banner').classList.add('hidden');
+          showToast("Refreshed data from Google Sheet!", "success");
+        } else {
+          document.getElementById('sync-banner').classList.remove('hidden');
+        }
+      } catch (err) {
+        console.warn("Could not fetch live Google Sheet, showing cached state:", err);
+        document.getElementById('sync-banner').classList.remove('hidden');
+      } finally {
+        icon.classList.remove('fa-spin');
+        refreshBtn.disabled = false;
+        refreshViewer();
+      }
+    }
+
+    function refreshViewer() {
+      const months = getMonthList();
+
+      document.getElementById('app-title-header').childNodes[0].nodeValue = viewerState.config.title + " ";
+      document.getElementById('header-duration-sub').textContent = `${months[0].label} – ${months[months.length - 1].label} (${viewerState.config.durationMonths} Months)`;
+
+      // Populate Month Select Dropdown
+      const dropdown = document.getElementById('month-select-dropdown');
+      dropdown.innerHTML = '';
+      months.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.index;
+        opt.textContent = `Month ${m.index}: ${m.label}`;
+        if (m.index === currentSelectedMonthIndex) opt.selected = true;
+        dropdown.appendChild(opt);
+      });
+
+      // Populate Personal Lookup Dropdown
+      const personalSelect = document.getElementById('personal-member-select');
+      personalSelect.innerHTML = '<option value="">-- Select Member --</option>';
+      viewerState.members.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = `${m.name} (${m.type === 'full' ? 'Full Share' : 'Half Share'})`;
+        personalSelect.appendChild(opt);
+      });
+
+      // Calculate KPI Totals
+      let totalSlotUnits = 0;
+      viewerState.members.forEach(mem => {
+        totalSlotUnits += (mem.type === 'full' ? 1.0 : 0.5);
+      });
+      const totalPool = (totalSlotUnits * viewerState.config.fullAmount);
+      document.getElementById('kpi-pool-total').innerHTML = `${totalPool.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
+      document.getElementById('kpi-slots-count').textContent = `${totalSlotUnits} Total Slots`;
+
+      renderSelectedMonthView();
+      renderMatrixView();
+    }
+
+    function renderSelectedMonthView() {
+      const monthIdx = parseInt(document.getElementById('month-select-dropdown').value, 10) || currentSelectedMonthIndex;
+      currentSelectedMonthIndex = monthIdx;
+
+      const recipients = viewerState.members.filter(m => parseInt(m.payoutMonth, 10) === monthIdx);
+      const spotlight = document.getElementById('recipient-spotlight-card');
+
+      if (recipients.length === 0) {
+        spotlight.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-amber-400 text-lg font-bold">
+              <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <div>
+              <h3 class="font-bold text-sm sm:text-base">No Recipient Assigned</h3>
+              <p class="text-xs text-slate-300">Slot ${monthIdx} has no member scheduled.</p>
+            </div>
+          </div>
+        `;
+      } else if (recipients.length === 1) {
+        const rec = recipients[0];
+        const duePayout = viewerState.config.fullAmount * 9;
+        spotlight.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
+              <i class="fa-solid fa-gift"></i>
+            </div>
+            <div>
+              <span class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-300">Month ${monthIdx} Recipient</span>
+              <h3 class="font-bold text-base sm:text-lg text-white flex items-center gap-2">${rec.name} <span class="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-indigo-800 text-indigo-200 border border-indigo-700">Full Share</span></h3>
+              <p class="text-xs text-slate-300">Net Payout: <strong class="text-emerald-400">${duePayout.toLocaleString()} SAR</strong> (Self-Deducted)</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-500/30 font-medium">
+              <i class="fa-solid fa-shield-halved mr-1"></i> Month Payout Scheduled
+            </span>
+          </div>
+        `;
+      } else {
+        const splitAmount = (viewerState.config.fullAmount * 9) / recipients.length;
+        const names = recipients.map(r => r.name).join(' & ');
+        spotlight.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-lg sm:text-xl font-bold shadow-lg shadow-indigo-500/30 shrink-0">
+              <i class="fa-solid fa-people-arrows"></i>
+            </div>
+            <div>
+              <span class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-indigo-300">Month ${monthIdx} Shared Slot (2 Recipients)</span>
+              <h3 class="font-bold text-base sm:text-lg text-white">${names}</h3>
+              <p class="text-xs text-slate-300">Split Payout: <strong class="text-emerald-400">${splitAmount.toLocaleString()} SAR</strong> each</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs bg-indigo-500/20 text-indigo-300 px-3 py-1.5 rounded-xl border border-indigo-500/30 font-medium">
+              <i class="fa-solid fa-users-viewfinder mr-1"></i> 50/50 Split Slot
+            </span>
+          </div>
+        `;
+      }
+
+      // Render Member List
+      const container = document.getElementById('month-participants-list');
+      container.innerHTML = '';
+
+      let totalCollected = 0;
+      let pendingCount = 0;
+
+      viewerState.members.forEach(member => {
+        const key = `${member.id}_${monthIdx}`;
+        const isRecipient = parseInt(member.payoutMonth, 10) === monthIdx;
+        const expectedAmt = member.type === 'full' ? viewerState.config.fullAmount : viewerState.config.halfAmount;
+        const record = viewerState.records[key] || {};
+        const status = record.status || (isRecipient ? 'recipient' : 'pending');
+
+        if (status === 'paid' || status === 'recipient') {
+          totalCollected += expectedAmt;
+        } else {
+          pendingCount++;
+        }
+
+        let badgeHtml = '';
+        if (status === 'paid') {
+          badgeHtml = `<span class="badge-paid px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-solid fa-circle-check text-xs"></i> Paid</span>`;
+        } else if (status === 'recipient') {
+          badgeHtml = `<span class="badge-recipient px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-solid fa-gift text-xs"></i> Covered (Recipient)</span>`;
+        } else {
+          badgeHtml = `<span class="badge-pending px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1"><i class="fa-regular fa-clock text-xs"></i> Pending</span>`;
+        }
+
+        const row = document.createElement('div');
+        row.className = "member-row p-4 hover:bg-slate-50/70 transition flex items-center justify-between gap-4";
+        row.setAttribute('data-name', member.name.toLowerCase());
+
+        row.innerHTML = `
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl ${member.type === 'full' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'} flex items-center justify-center font-bold text-xs sm:text-sm shrink-0">
+              ${member.type === 'full' ? '1.0' : '0.5'}
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-900 text-sm">${member.name}</span>
+                ${isRecipient ? '<span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">Recipient</span>' : ''}
+              </div>
+              <p class="text-xs text-slate-500">
+                ${member.type === 'full' ? 'Full Share' : 'Half Share'} &bull; Amount: <strong class="text-slate-800">${expectedAmt.toLocaleString()} SAR</strong>
+              </p>
+            </div>
+          </div>
+          <div>
+            ${badgeHtml}
+          </div>
+        `;
+        container.appendChild(row);
+      });
+
+      // Update KPI Banner
+      document.getElementById('kpi-collected-amount').innerHTML = `${totalCollected.toLocaleString()} <span class="text-xs font-normal text-slate-500">SAR</span>`;
+      document.getElementById('kpi-pending-badge').textContent = `${pendingCount} Pending`;
+
+      const recipientNames = recipients.map(r => r.name).join(' & ') || 'None';
+      document.getElementById('kpi-recipient-names').innerHTML = `<i class="fa-solid fa-gift text-indigo-500"></i> ${recipientNames}`;
+    }
+
+    function filterMemberList() {
+      const query = document.getElementById('member-search-input').value.toLowerCase();
+      document.querySelectorAll('.member-row').forEach(row => {
+        const name = row.getAttribute('data-name');
+        if (name.includes(query)) {
+          row.classList.remove('hidden');
+        } else {
+          row.classList.add('hidden');
+        }
+      });
+    }
+
+    function renderMatrixView() {
+      const months = getMonthList();
+      const table = document.getElementById('matrix-table');
+      table.innerHTML = '';
+
+      const thead = document.createElement('thead');
+      thead.className = "bg-slate-900 text-white sticky top-0 z-20";
+      let headerRow = `<tr>
+        <th class="p-3 text-left font-bold text-xs uppercase tracking-wider sticky left-0 bg-slate-900 z-30 shadow-r">Participant</th>
+        <th class="p-3 text-center font-bold text-xs uppercase tracking-wider">Share</th>
+        <th class="p-3 text-center font-bold text-xs uppercase tracking-wider">Slot</th>`;
+
+      months.forEach(m => {
+        headerRow += `<th class="p-3 text-center font-bold text-xs whitespace-nowrap">${m.shortLabel}</th>`;
+      });
+      headerRow += `<th class="p-3 text-center font-bold text-xs uppercase tracking-wider">Progress</th></tr>`;
+      thead.innerHTML = headerRow;
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      tbody.className = "divide-y divide-slate-200 bg-white";
+
+      viewerState.members.forEach((member, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = idx % 2 === 0 ? "hover:bg-slate-50" : "bg-slate-50/50 hover:bg-slate-100/70";
+
+        let paidCount = 0;
+        let monthCells = '';
+
+        months.forEach(m => {
+          const key = `${member.id}_${m.index}`;
+          const isRecipient = parseInt(member.payoutMonth, 10) === m.index;
+          const rec = viewerState.records[key];
+          let status = rec ? rec.status : (isRecipient ? 'recipient' : 'pending');
+
+          if (status === 'paid' || status === 'recipient') {
+            paidCount++;
+          }
+
+          let badgeHtml = '';
+          if (status === 'paid') {
+            badgeHtml = `<span class="badge-paid px-2 py-0.5 rounded text-[10px] font-bold"><i class="fa-solid fa-check"></i> Paid</span>`;
+          } else if (status === 'recipient') {
+            badgeHtml = `<span class="badge-recipient px-2 py-0.5 rounded text-[10px] font-bold"><i class="fa-solid fa-gift"></i> Covered</span>`;
+          } else {
+            badgeHtml = `<span class="badge-pending px-2 py-0.5 rounded text-[10px] font-bold"><i class="fa-regular fa-clock"></i> Pending</span>`;
+          }
+
+          monthCells += `<td class="p-2 text-center whitespace-nowrap">${badgeHtml}</td>`;
+        });
+
+        const progressPercent = Math.round((paidCount / months.length) * 100);
+
+        tr.innerHTML = `
+          <td class="p-3 font-semibold text-slate-800 text-xs sm:text-sm sticky left-0 bg-inherit z-10 shadow-r">
+            ${member.name}
+          </td>
+          <td class="p-3 text-center">
+            <span class="text-[11px] px-2 py-0.5 rounded-full font-bold ${member.type === 'full' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">
+              ${member.type === 'full' ? 'Full' : 'Half'}
+            </span>
+          </td>
+          <td class="p-3 text-center text-xs font-bold text-slate-600">
+            Slot ${member.payoutMonth}
+          </td>
+          ${monthCells}
+          <td class="p-3 text-center">
+            <div class="flex items-center justify-center gap-1.5">
+              <div class="w-10 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                <div class="bg-emerald-500 h-1.5 rounded-full" style="width: ${progressPercent}%"></div>
+              </div>
+              <span class="text-[10px] font-bold text-slate-600">${paidCount}/${months.length}</span>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+    }
+
+    function renderPersonalStatement() {
+      const memberId = document.getElementById('personal-member-select').value;
+      const container = document.getElementById('personal-statement-card');
+
+      if (!memberId) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const member = viewerState.members.find(m => m.id === memberId);
+      if (!member) return;
+
+      const months = getMonthList();
+      let paidCount = 0;
+      let rowsHtml = '';
+
+      months.forEach(m => {
+        const key = `${member.id}_${m.index}`;
+        const isRecipient = parseInt(member.payoutMonth, 10) === m.index;
+        const rec = viewerState.records[key] || {};
+        const status = rec.status || (isRecipient ? 'recipient' : 'pending');
+
+        if (status === 'paid' || status === 'recipient') paidCount++;
+
+        let badge = '';
+        if (status === 'paid') badge = `<span class="badge-paid px-2.5 py-1 rounded-lg text-xs font-bold">Paid</span>`;
+        else if (status === 'recipient') badge = `<span class="badge-recipient px-2.5 py-1 rounded-lg text-xs font-bold">Covered (Payout Month)</span>`;
+        else badge = `<span class="badge-pending px-2.5 py-1 rounded-lg text-xs font-bold">Pending</span>`;
+
+        rowsHtml += `
+          <div class="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100">
+            <div>
+              <span class="font-bold text-slate-800 text-xs sm:text-sm">Month ${m.index}: ${m.label}</span>
+              <p class="text-[11px] text-slate-400">${isRecipient ? 'Personal Payout Slot' : 'Regular Contribution'}</p>
+            </div>
+            <div>${badge}</div>
+          </div>
+        `;
+      });
+
+      const progressPercent = Math.round((paidCount / months.length) * 100);
+
+      container.innerHTML = `
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-md p-6 space-y-6">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-emerald-600">Personal Ledger Statement</span>
+              <h3 class="text-lg font-bold text-slate-900">${member.name}</h3>
+              <p class="text-xs text-slate-500">${member.type === 'full' ? 'Full Share (2,000 SAR/mo)' : 'Half Share (1,000 SAR/mo)'} &bull; Payout Slot ${member.payoutMonth}</p>
+            </div>
+            <div class="text-right">
+              <span class="text-2xl font-extrabold text-emerald-600">${paidCount}/${months.length}</span>
+              <p class="text-[10px] text-slate-400 uppercase font-bold">Months Completed</p>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-xs font-bold mb-1">
+              <span class="text-slate-600">Cycle Completion Status</span>
+              <span class="text-emerald-600">${progressPercent}%</span>
+            </div>
+            <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+              <div class="bg-emerald-500 h-2.5 rounded-full transition-all duration-500" style="width: ${progressPercent}%"></div>
+            </div>
+          </div>
+
+          <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
+            ${rowsHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    function switchViewTab(tabId) {
+      document.querySelectorAll('.view-tab-btn').forEach(btn => {
+        btn.className = "view-tab-btn px-3.5 py-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 flex items-center gap-2 transition-all shrink-0";
+      });
+
+      document.getElementById('view-month').classList.add('hidden');
+      document.getElementById('view-matrix').classList.add('hidden');
+      document.getElementById('view-lookup').classList.add('hidden');
+
+      if (tabId === 'month') {
+        document.getElementById('tab-btn-month').className = "view-tab-btn px-3.5 py-2 rounded-lg text-emerald-400 bg-slate-800 flex items-center gap-2 transition-all shrink-0 font-bold";
+        document.getElementById('view-month').classList.remove('hidden');
+      } else if (tabId === 'matrix') {
+        document.getElementById('tab-btn-matrix').className = "view-tab-btn px-3.5 py-2 rounded-lg text-emerald-400 bg-slate-800 flex items-center gap-2 transition-all shrink-0 font-bold";
+        document.getElementById('view-matrix').classList.remove('hidden');
+        renderMatrixView();
+      } else if (tabId === 'lookup') {
+        document.getElementById('tab-btn-lookup').className = "view-tab-btn px-3.5 py-2 rounded-lg text-emerald-400 bg-slate-800 flex items-center gap-2 transition-all shrink-0 font-bold";
+        document.getElementById('view-lookup').classList.remove('hidden');
+      }
+    }
+
+    function showToast(message, type = "success") {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      
+      let bg = "bg-slate-900 border-slate-700 text-white";
+      let icon = '<i class="fa-solid fa-circle-info text-blue-400"></i>';
+      if (type === 'success') {
+        bg = "bg-emerald-900 border-emerald-700 text-white";
+        icon = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
+      }
+
+      toast.className = `${bg} pointer-events-auto border shadow-xl rounded-2xl px-4 py-3 text-xs font-semibold flex items-center gap-2.5 transition-all duration-300 transform translate-y-2 opacity-0`;
+      toast.innerHTML = `${icon} <span>${message}</span>`;
+      container.appendChild(toast);
+
+      setTimeout(() => toast.classList.remove('translate-y-2', 'opacity-0'), 10);
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      viewerState = loadLocalState();
+      currentSelectedMonthIndex = determineCurrentMonthIndex();
+      refreshViewer();
+      fetchLatestData(); // Automatically fetch live state from Google Sheet
+    });
+  </script>
+</body>
+</html>
